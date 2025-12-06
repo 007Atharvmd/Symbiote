@@ -17,16 +17,7 @@ Symbiote operates on a **"Lock and Key"** model:
 2.  **The Guard (C2 Server):** A Go-based HTTP server hosts the file but only serves it to agents with a specific secret User-Agent.
 3.  **The Key (Implant):** A C-based dropper runs on the victim, detects its own MAC address, downloads the payload, decrypts it in memory, and executes it as a background daemon.
 
-```mermaid
-graph TD
-    A[Attacker] -->|1. Build & Encrypt (Key: Target MAC)| B(Encrypted Payload)
-    B -->|2. Host File| C[Go C2 Server]
-    D[Victim Machine] -->|3. Request (Secret User-Agent)| C
-    C -->|4. Download Encrypted Blob| D
-    D -->|5. Detect Local MAC| D
-    D -->|6. XOR Decrypt| E{MAC Match?}
-    E -->|Yes| F[Execute Payload]
-    E -->|No| G[Crash / Garbage Data]
+
 ✨ Key Features
 🔒 Anti-Forensics / Sandbox Evasion: The payload is cryptographically locked to the specific hardware of the target.
 
