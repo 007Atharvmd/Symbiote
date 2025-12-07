@@ -70,6 +70,59 @@ go build -o symbiote.exe main.go
 go build -o symbiote main.go
 You now have the executable CLI tool (symbiote.exe or symbiote) ready to use.
 
+# 📚 Command Reference
+Once built, the tool provides built-in help menus.
+
+
+$ ./symbiote
+A Red Team tool to generate and serve hardware-locked payloads.
+
+Usage:
+  symbiote [command]
+
+Available Commands:
+  build       Encrypts a payload using a target MAC address
+  completion  Generate the autocompletion script for the specified shell
+  help        Help about any command
+  serve       Starts the C2 delivery server
+
+Flags:
+  -h, --help   help for symbiote
+
+
+## Build Command
+Used to encrypt your malicious file.
+
+
+$ ./symbiote build -h
+Encrypts a payload using a target MAC address
+
+Usage:
+  symbiote build [flags]
+
+Flags:
+  -h, --help           help for build
+  -i, --input string   Input raw shellcode file (default "calc.bin")
+  -m, --mac string     Target MAC Address (Required)
+  -o, --out string     Output filename (default "favicon.ico")
+
+
+## Serve Command
+Used to host the C2 server.
+
+Plaintext
+
+$ ./symbiote serve -h
+Starts the C2 delivery server
+
+Usage:
+  symbiote serve [flags]
+
+Flags:
+  -f, --file string    Payload file to serve (default "favicon.ico")
+  -h, --help           help for serve
+  -p, --port string    Port to listen on (default "8080")
+
 🚀 Usage Guide
 # 1. Reconnaissance
 Obtain the MAC address of your target machine.
